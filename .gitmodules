@@ -1,0 +1,3 @@
+[submodule "train/affectnet_small"]
+	path = train/affectnet_small
+	url = https://github.com/thecduarte/affectnet_small.git
