@@ -1,3 +1,6 @@
 [submodule "train/affectnet_small"]
 	path = train/affectnet_small
 	url = https://github.com/thecduarte/affectnet_small.git
+[submodule "general_helpers"]
+	path = general_helpers
+	url = https://github.com/robocanes/general_helpers.git

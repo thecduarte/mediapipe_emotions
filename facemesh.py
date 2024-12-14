@@ -225,7 +225,8 @@ class FaceMesh:
 
         # Initialize MediaPipe FaceMesh
         # Designate face landmarker model
-        model = 'face_landmarker.task'
+        # model = 'face_landmarker.task'
+        model = 'face_landmarker_v2_with_blendshapes.task'
         self.det_result = None
         
         # Generate FaceLandmarker object.
