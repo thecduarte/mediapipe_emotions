@@ -80,7 +80,7 @@ class FaceMeshAnnotate:
 
         det_result = self.facemesh_detector.detect(mp_img)
 
-        # print(f'det_result: {det_result}')
+        print(f'det_result: {det_result}')
 
         if det_result is not None:
             # print(f'det_result: {det_result}')
@@ -283,13 +283,13 @@ class FaceMeshAnnotate:
         npy_files = self.general_helper.recursive_get_file_list(dir_path=self.start_npy_path)
         print(f'npy_files: {npy_files}')
 
-        ano_npy_files = [elem['basename'] for elem in npy_files if elem['basename'].split('_')[1] == 'aro.npy']
+        ano_npy_files = [elem['basename'] for elem in npy_files if (elem['basename'].split('_')[0] in self.valid_files_idxs and elem['basename'].split('_')[1] == 'aro.npy')]
         print(f'ano_npy_files: {ano_npy_files}')
 
-        exp_npy_files = [elem['basename'] for elem in npy_files if elem['basename'].split('_')[1] == 'exp.npy']
+        exp_npy_files = [elem['basename'] for elem in npy_files if (elem['basename'].split('_')[0] in self.valid_files_idxs and elem['basename'].split('_')[1] == 'exp.npy')]
         print(f'exp_npy_files: {exp_npy_files}')
 
-        lnd_npy_files = [elem['basename'] for elem in npy_files if elem['basename'].split('_')[1] == 'lnd.npy']
+        lnd_npy_files = [elem['basename'] for elem in npy_files if (elem['basename'].split('_')[0] in self.valid_files_idxs and elem['basename'].split('_')[1] == 'lnd.npy')]
         print(f'lnd_npy_files: {lnd_npy_files}')
 
         self.copy_files(src_dir=self.start_npy_path, dst_dir=self.annotate_aro_path, valid_files=ano_npy_files)
