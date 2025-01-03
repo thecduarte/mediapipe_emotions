@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
+from natsort import natsorted
+from tqdm import tqdm
 
 # Vision
 import cv2
@@ -59,16 +61,16 @@ class FaceMeshAnnotate:
 
     def process_single_img(self, elem, debug=False):
         img_path = elem['path']
-        print(f'current_path:', img_path)
+        # print(f'current_path:', img_path)
 
         file_index = elem['basename'].split('.')[0]
-        print(f'file_index: {file_index}')
+        # print(f'file_index: {file_index}')
 
         annotate_img_fp = os.path.join(f'{self.annotate_img_path}', f"{file_index}.jpg")
-        print(f'current annotate img fp:', annotate_img_fp)
+        # print(f'current annotate img fp:', annotate_img_fp)
 
         annotate_json_fp = os.path.join(f'{self.annotate_json_path}', f"{file_index}.json")
-        print(f'current annotate json fp:', annotate_json_fp)
+        # print(f'current annotate json fp:', annotate_json_fp)
 
         img = Image.open(img_path)
         img = np.array(img)
@@ -80,14 +82,14 @@ class FaceMeshAnnotate:
 
         det_result = self.facemesh_detector.detect(mp_img)
 
-        print(f'det_result: {det_result}')
+        # print(f'det_result: {det_result}')
 
         if det_result is not None:
             # print(f'det_result: {det_result}')
 
             det_num_faces = det_result.face_landmarks
 
-            print(f'num_det_faces: {len(det_num_faces)}')
+            # print(f'num_det_faces: {len(det_num_faces)}')
 
             # There must be at least one face in the current frame.
             if len(det_num_faces) != 1:
@@ -125,11 +127,11 @@ class FaceMeshAnnotate:
         self.det_result = result
 
     def save_facemesh_img(self, img, annotate_img_fp):
-        print(f'IMG save! @ {annotate_img_fp}')
+        # print(f'IMG save! @ {annotate_img_fp}')
         cv2.imwrite(annotate_img_fp, img)
 
     def save_facemesh_json(self, det_result, annotate_json_fp):
-        print(f'JSON save! @ {annotate_json_fp}')
+        # print(f'JSON save! @ {annotate_json_fp}')
         # View detection _results
         # print(self.det_result.__dict__)
 
@@ -175,7 +177,7 @@ class FaceMeshAnnotate:
             try:
                 if os.path.isfile(src_fp):
                     shutil.copy(src_fp, dst_fp)
-                    print(f"Copied file from '{src_fp} to '{dst_fp}'!")
+                    # print(f"Copied file from '{src_fp} to '{dst_fp}'!")
 
             except Exception as e:
                 print(f"Unable to copy file from '{src_fp}' to '{dst_fp}'! Exception: {e}")
@@ -244,8 +246,15 @@ class FaceMeshAnnotate:
 
         self.annotate_lnd_path = os.path.join(self.annotate_npy_path, 'lnd')
         self.general_helper.dir_create(self.annotate_lnd_path)
+
+        file_num_limit = 100000
         
-        self.img_files = self.general_helper.recursive_get_file_list(dir_path=self.start_imgs_path)
+        self.img_files = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.start_imgs_path), key=lambda x:x['basename'])
+
+        if file_num_limit is not None:
+            self.img_files = self.img_files[:file_num_limit]
+
+        # print(f'self.img_files: {self.img_files}')
 
         # self.general_helper.pprint_iterable(iterable=self.img_files)
 
@@ -266,7 +275,8 @@ class FaceMeshAnnotate:
         start_time = time.time()
 
         # Single Thread
-        for elem in self.img_files:
+        for i in tqdm(range(len(self.img_files)), desc="Processing Imgs..."):
+            elem = self.img_files[i]
             self.process_single_img(elem=elem)
 
         # Multiple Threads
@@ -274,23 +284,48 @@ class FaceMeshAnnotate:
 
         print(f'num_processed_files: {len(self.img_files)}')
 
-        self.valid_img_files = self.general_helper.recursive_get_file_list(dir_path=self.annotate_img_path)
+        self.valid_img_files = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.annotate_img_path), key=lambda x:x['basename'])
+
+        if file_num_limit is not None:
+            self.valid_img_files = self.valid_img_files[:file_num_limit]
+
         print(f'num valid_imgs_files: {len(self.valid_img_files)}')
 
         self.valid_files_idxs = [elem['basename'].split('.')[0] for elem in self.valid_img_files]
-        print(f'self.valid_files_idxs: {self.valid_files_idxs}')
+        # print(f'self.valid_files_idxs: {self.valid_files_idxs}')
+        print(f'num valid_files_idx: {len(self.valid_files_idxs)}')
 
-        npy_files = self.general_helper.recursive_get_file_list(dir_path=self.start_npy_path)
-        print(f'npy_files: {npy_files}')
+        npy_files = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.start_npy_path), key=lambda x:x['basename'])
 
-        ano_npy_files = [elem['basename'] for elem in npy_files if (elem['basename'].split('_')[0] in self.valid_files_idxs and elem['basename'].split('_')[1] == 'aro.npy')]
-        print(f'ano_npy_files: {ano_npy_files}')
+        # if file_num_limit is not None:
+        #     npy_files = npy_files[:file_num_limit]
 
-        exp_npy_files = [elem['basename'] for elem in npy_files if (elem['basename'].split('_')[0] in self.valid_files_idxs and elem['basename'].split('_')[1] == 'exp.npy')]
-        print(f'exp_npy_files: {exp_npy_files}')
+        # print(f'npy_files: {npy_files}')
+        print(f'num npy_files: {len(npy_files)}')
 
-        lnd_npy_files = [elem['basename'] for elem in npy_files if (elem['basename'].split('_')[0] in self.valid_files_idxs and elem['basename'].split('_')[1] == 'lnd.npy')]
-        print(f'lnd_npy_files: {lnd_npy_files}')
+        ano_npy_files, exp_npy_files, lnd_npy_files = [], [], []
+        for i in tqdm(range(len(npy_files)), desc="Processing NPY..."):
+            elem = npy_files[i]
+            if elem['basename'].split('_')[0] in self.valid_files_idxs:
+                if elem['basename'].split('_')[1] == 'aro.npy':
+                    ano_npy_files.append(elem['basename'])
+                if elem['basename'].split('_')[1] == 'exp.npy':
+                    exp_npy_files.append(elem['basename'])
+                if elem['basename'].split('_')[1] == 'lnd.npy':
+                    lnd_npy_files.append(elem['basename'])
+       
+        # ano_npy_files = [elem['basename'] for elem in npy_files if (elem['basename'].split('_')[0] in self.valid_files_idxs and elem['basename'].split('_')[1] == 'aro.npy')]
+        # # print(f'ano_npy_files: {ano_npy_files}')
+        
+        # exp_npy_files = [elem['basename'] for elem in npy_files if (elem['basename'].split('_')[0] in self.valid_files_idxs and elem['basename'].split('_')[1] == 'exp.npy')]
+        # # print(f'exp_npy_files: {exp_npy_files}')
+        
+        # lnd_npy_files = [elem['basename'] for elem in npy_files if (elem['basename'].split('_')[0] in self.valid_files_idxs and elem['basename'].split('_')[1] == 'lnd.npy')]
+        # # print(f'lnd_npy_files: {lnd_npy_files}')
+        
+        print(f'num ano_npy_files: {len(ano_npy_files)}')
+        print(f'num exp_npy_files: {len(exp_npy_files)}')
+        print(f'num lnd_npy_files: {len(lnd_npy_files)}')
 
         self.copy_files(src_dir=self.start_npy_path, dst_dir=self.annotate_aro_path, valid_files=ano_npy_files)
         self.copy_files(src_dir=self.start_npy_path, dst_dir=self.annotate_exp_path, valid_files=exp_npy_files)
