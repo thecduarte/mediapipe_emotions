@@ -7,17 +7,20 @@ sys.path.append(project_root)
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import mediapipe as mp
 
+from collections import Counter
 from natsort import natsorted
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
-from torch_geometric.nn import GCNConv
+from torch_geometric.nn import GCNConv, global_mean_pool
 from torch.utils.data import Dataset, random_split
 from tqdm import tqdm
 
 from general_helpers.general_helper import GeneralHelper
+from model import GNN
 
 mp_face_mesh = mp.solutions.face_mesh
 FACEMESH_CONNECTIONS = mp_face_mesh.FACEMESH_TESSELATION
@@ -28,21 +31,21 @@ class EmotionFacemeshDataset(Dataset):
         # print(f'facemesh_landmarks: {facemesh_landmarks}')
 
         nodes = np.array([lm['position'] for lm in facemesh_landmarks])
-        print(f'nodes: {nodes}')
-        print(f'nodes shape: {nodes.shape}')
+        # print(f'nodes: {nodes}')
+        # print(f'nodes shape: {nodes.shape}')
 
         nodes = torch.tensor(nodes, dtype=torch.float)
 
         edge_index = np.array(list(FACEMESH_CONNECTIONS), dtype=np.int64).T
-        print(f'edge_index: {edge_index}')
-        print(f'edge_index shape: {edge_index.shape}')
+        # print(f'edge_index: {edge_index}')
+        # print(f'edge_index shape: {edge_index.shape}')
 
         edge_index = torch.tensor(edge_index, dtype=torch.long)
 
         return nodes, edge_index
     
-    def construct_train_dataset(self, arousal_train_data, valence_train_data, expression_train_data, facemesh_train_data): 
-        train_data = []
+    def construct_train_dataset(self, arousal_train_data, valence_train_data, expression_train_data, facemesh_train_data):
+        arousal_labels, valence_labels, expression_labels = [], [], []
         for i in range(len(facemesh_train_data)):
             facemesh_elem = facemesh_train_data[i]
             arousal_elem = arousal_train_data[i]
@@ -66,11 +69,42 @@ class EmotionFacemeshDataset(Dataset):
 
                 return
             
+            arousal_label = float(arousal_elem['data'])
+            valence_label = float(valence_elem['data'])
+            expression_label = float(expression_elem['data'])
+
+            # print(f'arousal_label: {arousal_label}')
+            # print(f'valence_label: {valence_label}')
+            # print(f'expression_label: {expression_label}')
+
+            arousal_labels.append(arousal_label)
+            valence_labels.append(valence_label)
+            expression_labels.append(valence_label)
+
+        min_expression_label = min(expression_labels)
+        max_expression_label = max(expression_labels)
+
+        label_frequency = Counter(expression_labels)
+
+        for label, count in label_frequency.items():
+            print(f'Num label -> {label} appears {count} times.')
+
+        print(f'expression label min -> {min_expression_label} max -> {max_expression_label}')
+
+        train_data = []
+        for i in tqdm(range(len(facemesh_train_data)), desc='Constructing Training Dataset...'):
+            facemesh_elem = facemesh_train_data[i]
+            arousal_label = arousal_labels[i]
+            valence_elem = valence_labels[i]
+            expression_elem = expression_labels[i]
+
+            # print(f'expression_elem: {expression_elem}')
+            
             # Assumption: FaceMesh data instance contains only one face.
             facemesh_data = facemesh_elem['data']
             facemesh_num_faces = len(facemesh_data)
 
-            print(f'num faces: {facemesh_num_faces}')
+            # print(f'num faces: {facemesh_num_faces}')
 
             if facemesh_num_faces != 1:
                 print(f'Facemesh data instance contains more than one face!')
@@ -80,22 +114,16 @@ class EmotionFacemeshDataset(Dataset):
 
             nodes, edge_index = self.facemesh_to_graph(facemesh_landmarks=facemesh_landmarks)
 
-            arousal_label = float(arousal_elem['data'])
-            valence_label = float(valence_elem['data'])
-            expression_label = float(expression_elem['data'])
+            # label_tensor = torch.tensor(expression_label, dtype=torch.long)
+            # label_tensor = torch.tensor([expression_label], dtype=torch.float)
 
-            print(f'arousal_label: {arousal_label}')
-            print(f'valence_label: {valence_label}')
-            print(f'expression_label: {expression_label}')
+            label_tensor = torch.tensor(expression_elem, dtype=torch.long)
 
-            graph_data = Data(x=nodes, edge_index=edge_index, y=torch.tensor([arousal_label, valence_label, expression_label], dtype=torch.float))
-            print(f'graph_data: {graph_data}')
+            # graph_data = Data(x=nodes, edge_index=edge_index, y=torch.tensor([arousal_label, valence_label, expression_label], dtype=torch.float))
+            graph_data = Data(x=nodes, edge_index=edge_index, y=label_tensor)
+            # print(f'graph_data: {graph_data}')
 
             train_data.append(graph_data)
-
-            # print(f'facemesh_data: {facemesh_data}')
-            
-            # nodes, edge_index = self.facemesh_to_graph()
 
         return train_data
 
@@ -112,88 +140,95 @@ class EmotionFacemeshDataset(Dataset):
         self.valence_dir = os.path.join(self.npy_dir, 'exp')
         self.lnd_dir = os.path.join(self.npy_dir, 'lnd')
 
-        # print(f'self.arousal_dir: {self.arousal_dir}')
+        self.train_data_fp = os.path.join(self.imgs_annotate_dir, 'data.pt')
 
-        # landmark_file_list = sorted(self.general_helper.recursive_get_file_list(dir_path=self.json_dir), key=lambda x:x['basename'])
-        # arousal_file_list = sorted(self.general_helper.recursive_get_file_list(dir_path=self.arousal_dir), key=lambda x:x['basename'])
-        # valence_file_list = sorted(self.general_helper.recursive_get_file_list(dir_path=self.valence_dir), key=lambda x:x['basename'])
-        # expression_file_list = sorted(self.general_helper.recursive_get_file_list(dir_path=self.valence_dir), key=lambda x: x['basename'])
+        if not os.path.isfile(self.train_data_fp):
 
-        landmark_file_list = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.json_dir), key=lambda x:x['basename'])
-        arousal_file_list = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.arousal_dir), key=lambda x:x['basename'])
-        valence_file_list = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.valence_dir), key=lambda x:x['basename'])
-        expression_file_list = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.valence_dir), key=lambda x:x['basename'])
-        
-        # print(f'landmark_file_list:', landmark_file_list)
-        # print(f'arousal_file_list:', arousal_file_list)
-        # print(f'valence_file_list: {valence_file_list}')
-        # print(f'land_file_list: {land_file_list}')
+            # print(f'self.arousal_dir: {self.arousal_dir}')
 
-        print(f'len landmark_file_list: {len(landmark_file_list)}')
-        print(f'len arousal_file_list: {len(arousal_file_list)}')
-        print(f'len valence_file_list: {len(valence_file_list)}')
-        print(f'len expression_file_list: {len(expression_file_list)}')
+            # landmark_file_list = sorted(self.general_helper.recursive_get_file_list(dir_path=self.json_dir), key=lambda x:x['basename'])
+            # arousal_file_list = sorted(self.general_helper.recursive_get_file_list(dir_path=self.arousal_dir), key=lambda x:x['basename'])
+            # valence_file_list = sorted(self.general_helper.recursive_get_file_list(dir_path=self.valence_dir), key=lambda x:x['basename'])
+            # expression_file_list = sorted(self.general_helper.recursive_get_file_list(dir_path=self.valence_dir), key=lambda x: x['basename'])
 
-        arousal_train_data = []
-        for elem in arousal_file_list:
-            data = np.load(elem['path'])
-            idx = elem['basename'].split('_')[0]
-            arousal_train_data.append({'idx': idx, 'data': data})
+            landmark_file_list = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.json_dir), key=lambda x:x['basename'])
+            arousal_file_list = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.arousal_dir), key=lambda x:x['basename'])
+            valence_file_list = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.valence_dir), key=lambda x:x['basename'])
+            expression_file_list = natsorted(self.general_helper.recursive_get_file_list(dir_path=self.valence_dir), key=lambda x:x['basename'])
+            
+            # print(f'landmark_file_list:', landmark_file_list)
+            # print(f'arousal_file_list:', arousal_file_list)
+            # print(f'valence_file_list: {valence_file_list}')
+            # print(f'land_file_list: {land_file_list}')
 
-        valence_train_data = []
-        for elem in valence_file_list:
-            data = np.load(elem['path'])
-            idx = elem['basename'].split('_')[0]
-            valence_train_data.append({'idx': idx, 'data': data})
-        
-        expression_train_data = []
-        for elem in expression_file_list:
-            data = np.load(elem['path'])
-            idx = elem['basename'].split('_')[0]
-            expression_train_data.append({'idx': idx, 'data': data})
+            print(f'len landmark_file_list: {len(landmark_file_list)}')
+            print(f'len arousal_file_list: {len(arousal_file_list)}')
+            print(f'len valence_file_list: {len(valence_file_list)}')
+            print(f'len expression_file_list: {len(expression_file_list)}')
 
-        facemesh_train_data = []
-        for elem in landmark_file_list:
-            data = self.general_helper.read_json_file(data_file_path=elem['path'])
-            idx = elem['basename'].split('.')[0]
-            facemesh_train_data.append({'idx': idx, 'data': data})
+            arousal_train_data = []
+            for i in tqdm(range(len(arousal_file_list)), desc='Formatting Arousal Data...'):
+                elem = arousal_file_list[i]
+                data = np.load(elem['path'])
+                idx = elem['basename'].split('_')[0]
+                arousal_train_data.append({'idx': idx, 'data': data})
 
-        self.train_data = self.construct_train_dataset(arousal_train_data=arousal_train_data,
-                                                  valence_train_data=valence_train_data,
-                                                  expression_train_data=expression_train_data,
-                                                  facemesh_train_data=facemesh_train_data)
-        
-        # print(f'train_data: {self.train_data}')
-        print(f'len train_data: {len(self.train_data)}')
+            valence_train_data = []
+            for i in tqdm(range(len(valence_file_list)), desc='Formatting Valence Data...'):
+                elem = valence_file_list[i]
+                data = np.load(elem['path'])
+                idx = elem['basename'].split('_')[0]
+                valence_train_data.append({'idx': idx, 'data': data})
+            
+            expression_train_data = []
+            for i in tqdm(range(len(expression_file_list)), desc='Formatting Expression Data...'):
+                elem = expression_file_list[i]
+                data = np.load(elem['path'])
+                idx = elem['basename'].split('_')[0]
+                expression_train_data.append({'idx': idx, 'data': data})
+
+            facemesh_train_data = []
+            for i in tqdm(range(len(landmark_file_list)), desc='Formatting Facemesh Data...'):
+                elem = landmark_file_list[i]
+                data = self.general_helper.read_json_file(data_file_path=elem['path'])
+                idx = elem['basename'].split('.')[0]
+                facemesh_train_data.append({'idx': idx, 'data': data})
+
+            print(f'len arousal_train_data: {len(arousal_train_data)}')
+            print(f'len valence_train_data: {len(valence_train_data)}')
+            print(f'len expression_train_data: {len(expression_train_data)}')
+            print(f'len facemesh_train_data: {len(facemesh_train_data)}')
+
+            print(f'Constructing training dataset!')
+
+            self.train_data = self.construct_train_dataset(arousal_train_data=arousal_train_data,
+                                                    valence_train_data=valence_train_data,
+                                                    expression_train_data=expression_train_data,
+                                                    facemesh_train_data=facemesh_train_data)
+            
+            # print(f'train_data: {self.train_data}')
+
+            torch.save(self.train_data, self.train_data_fp)
+
+            print(f'Training data saved at -> {self.train_data_fp}')
+        else:
+            self.train_data = torch.load(self.train_data_fp)
+
+            print(f'Training data loaded from -> {self.train_data_fp}')
+
+        # Train data elem
+        if len(self.train_data) > 0:
+            train_data_elem = self.train_data[0]
+            print(f'train_data_elem: {train_data_elem}')
+            print(f'train_data_elem_x: {train_data_elem.x}')
+
+            print(f'len train_data: {len(self.train_data)}')
 
     def __len__(self):
         return len(self.train_data)
 
     def __getitem__(self, idx):
         return self.train_data[idx]
-
-
-class GNN(nn.Module):
-    def __init__(self, input_dim, hidden_dim, label_dim):
-        super(GNN, self).__init__()
-        self.conv1 = GCNConv(input_dim, hidden_dim)
-        self.conv2 = GCNConv(hidden_dim, hidden_dim)
-        self.attention = nn.Linear(hidden_dim, 1)
-        self.fc = nn.Linear(hidden_dim, label_dim)
-
-    def forward(self, data):
-        x, edge_index = data.x, data.edge_index
-        x = self.conv1(x, edge_index)
-        x = torch.relu(x)
-        x = self.conv2(x, edge_index)
-        x = torch.relu(x)
-        # x = torch.mean(x, dim=0)
-        # Attention pooling
-        attention_weights = torch.softmax(self.attention(x), dim=0)  # Compute attention weights
-        x = torch.sum(attention_weights * x, dim=0)  # Weighted sum of node features
-
-        x = self.fc(x)
-        return x
 
 class Trainer:
     def __init__(self, device, model, loader, criterion, optimizer, val_loader=None):
@@ -232,10 +267,6 @@ class Trainer:
                 self.optimizer.zero_grad()
 
                 outputs = self.model(batch)
-                # print(f"Output shape: {outputs.shape}")
-
-                # batch.y = batch.y.view(batch.batch_size,3)
-                # print(f"Target shape: {batch.y.shape}")
 
                 loss = self.criterion(outputs, batch.y)
                 loss.backward()
@@ -270,41 +301,38 @@ class Trainer:
         self.model.to(self.device)
         print(f"Model loaded from {path}")
 
+# Now let's run everything with the GNN model.
+
 if __name__ == '__main__':
-    emotion_facemesh_dataset = EmotionFacemeshDataset()
+    emotion_facemesh_dataset = EmotionFacemeshDataset()  # Assume this returns your dataset
     
-    # 80 - 20 train val split
+    # 80 - 20 train-val split
     train_size = int(0.8 * len(emotion_facemesh_dataset))
     print(f'train_size: {train_size}')
-
     val_size = len(emotion_facemesh_dataset) - train_size
     print(f'val_size: {val_size}')
-    train_dataset, val_dataset = random_split(emotion_facemesh_dataset,  [train_size, val_size])
     
-    print(f'train_dataset: {train_dataset}')
-    print(f'val_dataset: {val_dataset}')
-
+    train_dataset, val_dataset = random_split(emotion_facemesh_dataset, [train_size, val_size])
+    
     # Create DataLoaders
-    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
 
     # Define Trainer parameters
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = GNN(input_dim=3,
-                hidden_dim=128,
-                label_dim=3).to(device)
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+    model = GNN(input_dim=3, hidden_dim=256, label_dim=8).to(device)
+    criterion = nn.CrossEntropyLoss()  # Use CrossEntropyLoss for classification
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
     
     # Initialize Trainer
     trainer = Trainer(
-        device = device,
-        model = model,
-        loader = train_loader,
-        criterion = criterion,
-        optimizer = optimizer,
-        val_loader = val_loader
+        device=device,
+        model=model,
+        loader=train_loader,
+        criterion=criterion,
+        optimizer=optimizer,
+        val_loader=val_loader
     )
 
     # Train the model
-    history = trainer.train(num_epochs=100, checkpoint_path='best_model.pth')
+    history = trainer.train(num_epochs=10000, checkpoint_path='best_model.pth')
